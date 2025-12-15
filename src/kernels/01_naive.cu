@@ -2,7 +2,6 @@
 #include <cuda_runtime.h>
 #include <stdlib.h>
 
-#define N 4096
 #define BLOCK_SIZE 32
 
 __global__ void sgemm_naive(const float *a, const float *b, float *c, int n) {
@@ -25,7 +24,9 @@ __global__ void sgemm_naive(const float *a, const float *b, float *c, int n) {
     }
 }
 
-int main() {
+int run_naive(int N) {
+    printf("\n=== RUNNING NAIVE SGEMM (N=%d) ===\n", N);
+
     size_t bytes = N * N * sizeof(float);
 
     // Host memory allocation
