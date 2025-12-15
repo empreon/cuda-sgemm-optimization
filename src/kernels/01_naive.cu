@@ -2,10 +2,10 @@
 #include <cuda_runtime.h>
 #include <stdlib.h>
 
-#define N 1024
+#define N 4096
 #define BLOCK_SIZE 32
 
-__global__ void sgemm_naive(const float *a, const float *b, const float *c, int n) {
+__global__ void sgemm_naive(const float *a, const float *b, float *c, int n) {
     // Column (x axis)
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     // Row (y axis)
@@ -15,10 +15,13 @@ __global__ void sgemm_naive(const float *a, const float *b, const float *c, int 
     if (col < n && row < n) {
 
         float sum = 0.0f;
+        int index = (row * n) + col;
 
         for (int k = 0; k < n; k++) {
-            sum += 0;
+            sum += a[row * n + k] * b[k * n + col];
         }
+
+        c[index] = sum; 
     }
 }
 
@@ -50,13 +53,36 @@ int main() {
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((N + BLOCK_SIZE - 1) / BLOCK_SIZE, (N + BLOCK_SIZE - 1) / BLOCK_SIZE);
 
+    /* Benchmark Start */
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
     printf("Running Naive SGEMM with Matrix Size %dx%d...\n", N, N);
+
+    // Start recording
+    cudaEventRecord(start);
 
     // Kernel launch
     sgemm_naive<<<gridSize, blockSize>>>(d_a, d_b, d_c, N);
 
+    // Stop recording
+    cudaEventRecord(stop);
+
     // Wait for GPU
     cudaDeviceSynchronize();
+
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    /* Benchmark Finish */
+
+    // GFLOPS Calculation (2 * N^3 operations are performed: Multiplication + Addition)
+    // We divided by 1e-3 because we are converting ms to seconds. We divided by 1e9 for Giga.
+    double flops = 2.0 * N * N * N;
+    double gflops = (flops / 1e9) / (milliseconds / 1000.0);
+
+    printf("Time: %f ms\n", milliseconds);
+    printf("Performance: %f GFLOPS\n", gflops);
 
     // Check for Error
     cudaError_t error = cudaGetLastError();
@@ -66,7 +92,7 @@ int main() {
     }
 
     // Copy back
-    cudaMemcpy(d_c, h_c, bytes, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_c, d_c, bytes, cudaMemcpyDeviceToHost);
 
     // Validation
     printf("Verifying check (0,0): %f\n", h_c[0]);
