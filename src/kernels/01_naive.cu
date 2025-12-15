@@ -50,7 +50,7 @@ int run_naive(int N) {
     cudaMemcpy(d_a, h_a, bytes, cudaMemcpyHostToDevice);
     cudaMemcpy(d_b, h_b, bytes, cudaMemcpyHostToDevice);
 
-    // Kernel Configuration
+    // Grid & Block Config
     dim3 blockSize(BLOCK_SIZE, BLOCK_SIZE);
     dim3 gridSize((N + BLOCK_SIZE - 1) / BLOCK_SIZE, (N + BLOCK_SIZE - 1) / BLOCK_SIZE);
 
@@ -61,13 +61,11 @@ int run_naive(int N) {
 
     printf("Running Naive SGEMM with Matrix Size %dx%d...\n", N, N);
 
-    // Start recording
     cudaEventRecord(start);
 
     // Kernel launch
     sgemm_naive<<<gridSize, blockSize>>>(d_a, d_b, d_c, N);
 
-    // Stop recording
     cudaEventRecord(stop);
 
     // Wait for GPU
