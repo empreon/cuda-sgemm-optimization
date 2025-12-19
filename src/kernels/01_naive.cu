@@ -1,14 +1,15 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 #include <stdlib.h>
+#include "kernels.h"
 
 #define BLOCK_SIZE 32
 
 __global__ void sgemm_naive(const float *a, const float *b, float *c, int n) {
-    // Column (x axis)
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-    // Row (y axis)
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    // Row varies with threadIdx.x
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    // Col varies with threadIdx.y
+    int col = blockIdx.y * blockDim.y + threadIdx.y;
 
     // Boundry check
     if (col < n && row < n) {
@@ -25,7 +26,7 @@ __global__ void sgemm_naive(const float *a, const float *b, float *c, int n) {
 }
 
 int run_naive(int N) {
-    printf("\n=== RUNNING NAIVE SGEMM (N=%d) ===\n", N);
+    printf("\n=== RUNNING NAIVE (UNCOALESCED) SGEMM (N=%d) ===\n", N);
 
     size_t bytes = N * N * sizeof(float);
 
@@ -59,7 +60,7 @@ int run_naive(int N) {
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
-    printf("Running Naive SGEMM with Matrix Size %dx%d...\n", N, N);
+    printf("Running Naive (Uncoalesced) SGEMM with Matrix Size %dx%d...\n", N, N);
 
     cudaEventRecord(start);
 
@@ -75,8 +76,7 @@ int run_naive(int N) {
     cudaEventElapsedTime(&milliseconds, start, stop);
     /* Benchmark Finish */
 
-    // GFLOPS Calculation (2 * N^3 operations are performed: Multiplication + Addition)
-    // We divided by 1e-3 because we are converting ms to seconds. We divided by 1e9 for Giga.
+    // GFLOPS Calculation
     double flops = 2.0 * N * N * N;
     double gflops = (flops / 1e9) / (milliseconds / 1000.0);
 
