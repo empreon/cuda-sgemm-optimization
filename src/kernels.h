@@ -4,5 +4,6 @@
 void run_naive(int N);
 void run_coalesced(int N);
 void run_tiling(int N);
+void run_vectorized(int N);
 
 #endif

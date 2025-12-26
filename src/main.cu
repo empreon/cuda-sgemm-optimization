@@ -8,4 +8,5 @@ int main() {
     run_naive(N);
     run_coalesced(N);
     run_tiling(N);
+    run_vectorized(N);
 }
