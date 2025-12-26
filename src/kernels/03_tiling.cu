@@ -25,7 +25,6 @@ __global__ void sgemm_tiled(const float *A, const float *B, float *C, int n) {
     // m: Which tile we are on?
     for (int m = 0; m < n / TILE_SIZE; ++m) {
 
-        // --- PHASE 1: Load Data to Shared Memory ---
         // Each thread get 1 element from Global and put it in Shared memory.
         
         // Load from A
@@ -37,7 +36,6 @@ __global__ void sgemm_tiled(const float *A, const float *B, float *C, int n) {
         // Wait for each thread to carry 1 element.
         __syncthreads();
 
-        // --- PHASE 2: Compute using Shared Memory ---
         for (int k = 0; k < TILE_SIZE; ++k) {
             sum += As[ty][k] * Bs[k][tx];
         }
