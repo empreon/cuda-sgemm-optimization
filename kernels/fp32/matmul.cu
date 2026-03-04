@@ -50,12 +50,12 @@ __device__ __forceinline__ float4 load_float4_with_bounds(
   return out;
 }
 
-extern "C" __global__ void matmul_naive(const float* A,
-                                        const float* B,
-                                        float* C,
-                                        int M,
-                                        int K,
-                                        int N) {
+__device__ __forceinline__ void matmul_naive_impl(const float* A,
+                                                  const float* B,
+                                                  float* C,
+                                                  int M,
+                                                  int K,
+                                                  int N) {
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -69,12 +69,12 @@ extern "C" __global__ void matmul_naive(const float* A,
   }
 }
 
-extern "C" __global__ void matmul_tiled(const float* A,
-                                        const float* B,
-                                        float* C,
-                                        int M,
-                                        int K,
-                                        int N) {
+__device__ __forceinline__ void matmul_tiled_impl(const float* A,
+                                                  const float* B,
+                                                  float* C,
+                                                  int M,
+                                                  int K,
+                                                  int N) {
   constexpr int kTileSize = MM_TILED_TILE;
   if (blockDim.x != kTileSize || blockDim.y != kTileSize) {
     return;
@@ -114,12 +114,12 @@ extern "C" __global__ void matmul_tiled(const float* A,
   }
 }
 
-extern "C" __global__ void matmul_vectorized(const float* __restrict__ A,
-                                             const float* __restrict__ B,
-                                             float* __restrict__ C,
-                                             int M,
-                                             int K,
-                                             int N) {
+__device__ __forceinline__ void matmul_vectorized_impl(const float* __restrict__ A,
+                                                       const float* __restrict__ B,
+                                                       float* __restrict__ C,
+                                                       int M,
+                                                       int K,
+                                                       int N) {
   constexpr int kVecTileSize = MM_VEC_TILE;
   constexpr int kVecWidth = MM_VEC_WIDTH;
   constexpr int kVBlockRows = MM_VBLOCK_ROWS;
@@ -139,7 +139,7 @@ extern "C" __global__ void matmul_vectorized(const float* __restrict__ A,
   const int col_base = blockIdx.x * kVecTileSize + local_col_vec * kVecWidth;
 
   float4 acc[kVBlockRows];
-  #pragma unroll
+#pragma unroll
   for (int row_offset = 0; row_offset < kVBlockRows; ++row_offset) {
     acc[row_offset] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
   }
@@ -148,7 +148,7 @@ extern "C" __global__ void matmul_vectorized(const float* __restrict__ A,
   for (int tile_idx = 0; tile_idx < tile_count; ++tile_idx) {
     const int k_col_start = tile_idx * kVecTileSize + local_col_vec * kVecWidth;
 
-    #pragma unroll
+#pragma unroll
     for (int row_offset = 0; row_offset < kVBlockRows; ++row_offset) {
       const int tile_row = local_row_block * kVBlockRows + row_offset;
       const int row = row_base + row_offset;
@@ -177,7 +177,7 @@ extern "C" __global__ void matmul_vectorized(const float* __restrict__ A,
 
     __syncthreads();
 
-    #pragma unroll
+#pragma unroll
     for (int k_local = 0; k_local < kVecTileSize; ++k_local) {
       const int b_col_start = local_col_vec * kVecWidth;
       const float4 b_values = make_float4(
@@ -186,7 +186,7 @@ extern "C" __global__ void matmul_vectorized(const float* __restrict__ A,
           tile_b[k_local][b_col_start + 2],
           tile_b[k_local][b_col_start + 3]);
 
-      #pragma unroll
+#pragma unroll
       for (int row_offset = 0; row_offset < kVBlockRows; ++row_offset) {
         const int row = row_base + row_offset;
         if (row >= M) {
@@ -205,7 +205,7 @@ extern "C" __global__ void matmul_vectorized(const float* __restrict__ A,
     __syncthreads();
   }
 
-  #pragma unroll
+#pragma unroll
   for (int row_offset = 0; row_offset < kVBlockRows; ++row_offset) {
     const int row = row_base + row_offset;
     if (row >= M) {
@@ -216,4 +216,15 @@ extern "C" __global__ void matmul_vectorized(const float* __restrict__ A,
     if (col_base + 2 < N) C[ROW_MAJOR_INDEX(row, col_base + 2, N)] = acc[row_offset].z;
     if (col_base + 3 < N) C[ROW_MAJOR_INDEX(row, col_base + 3, N)] = acc[row_offset].w;
   }
+}
+
+extern "C" __global__ void matmul(const float* __restrict__ A,
+                                  const float* __restrict__ B,
+                                  float* __restrict__ C,
+                                  int M,
+                                  int K,
+                                  int N) {
+  // matmul_naive_impl(A, B, C, M, K, N);
+  // matmul_tiled_impl(A, B, C, M, K, N);
+  matmul_vectorized_impl(A, B, C, M, K, N);
 }

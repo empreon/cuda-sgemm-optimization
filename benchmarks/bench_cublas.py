@@ -51,16 +51,13 @@ def _run_cublas_row_major(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Benchmark custom PyCUDA matmul kernels against cuBLAS SGEMM."
+        description="Benchmark active PyCUDA matmul kernel against cuBLAS SGEMM."
     )
     parser.add_argument("--m", type=int, default=1024)
     parser.add_argument("--k", type=int, default=512)
     parser.add_argument("--n", type=int, default=2048)
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--repeat", type=int, default=20)
-    parser.add_argument("--kernel", choices=["naive", "tiled", "vectorized"], default="naive")
-    parser.add_argument("--block-x", type=int, default=16)
-    parser.add_argument("--block-y", type=int, default=16)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--atol", type=float, default=1e-4)
     return parser.parse_args()
@@ -89,17 +86,12 @@ def main() -> None:
     c_custom_gpu = engine.alloc("C_custom", m * n * np.dtype(np.float32).itemsize, reuse=False)
     c_cublas_gpu = engine.alloc("C_cublas", m * n * np.dtype(np.float32).itemsize, reuse=False)
 
-    if args.kernel == "vectorized":
-        block = (Engine.VEC_TILE // Engine.VEC_WIDTH, Engine.VEC_TILE // Engine.VBLOCK_ROWS, 1)
-    else:
-        block = (args.block_x, args.block_y, 1)
+    block = (Engine.VEC_TILE // Engine.VEC_WIDTH, Engine.VEC_TILE // Engine.VBLOCK_ROWS, 1)
 
     handle = cublas.cublasCreate()
     try:
         custom_stats = gpu_benchmark(
-            lambda: engine.run_matmul(
-                a_gpu, b_gpu, c_custom_gpu, m=m, k=k, n=n, kernel=args.kernel, block=block
-            ),
+            lambda: engine.matmul(a_gpu, b_gpu, c_custom_gpu, m=m, k=k, n=n, block=block),
             warmup=args.warmup,
             repeat=args.repeat,
         )
@@ -123,7 +115,7 @@ def main() -> None:
 
     print("=== Matrix Multiply Benchmark ===")
     print(f"Shapes: A=({m}, {k}), B=({k}, {n}), C=({m}, {n})")
-    print(f"Custom kernel: {args.kernel}, block={block}")
+    print(f"Custom block={block}")
     print(f"Custom mean: {custom_mean:.4f} ms")
     print(f"cuBLAS mean: {cublas_mean:.4f} ms")
     print(

@@ -16,12 +16,10 @@ class LinearLayer:
         out_features: int,
         weights: Optional[np.ndarray] = None,
         bias: Optional[np.ndarray] = None,
-        matmul_kernel: str = "tiled",
     ) -> None:
         self.engine = engine
         self.in_features = in_features
         self.out_features = out_features
-        self.matmul_kernel = matmul_kernel
 
         if weights is None:
             scale = np.sqrt(2.0 / max(1, in_features))
@@ -54,21 +52,24 @@ class LinearLayer:
         input_gpu: cuda.DeviceAllocation,
         batch_size: int,
         output_gpu: Optional[cuda.DeviceAllocation] = None,
-        block: tuple[int, int, int] = (16, 16, 1),
+        block: tuple[int, int, int] = (
+            Engine.VEC_TILE // Engine.VEC_WIDTH,
+            Engine.VEC_TILE // Engine.VBLOCK_ROWS,
+            1,
+        ),
         stream: Optional[cuda.Stream] = None,
     ) -> cuda.DeviceAllocation:
         output_nbytes = batch_size * self.out_features * np.dtype(np.float32).itemsize
         if output_gpu is None:
             output_gpu = cuda.mem_alloc(output_nbytes)
 
-        self.engine.run_matmul(
+        self.engine.matmul(
             input_gpu,
             self.weights_gpu,
             output_gpu,
             m=batch_size,
             k=self.in_features,
             n=self.out_features,
-            kernel=self.matmul_kernel,
             block=block,
             stream=stream,
         )
@@ -77,7 +78,11 @@ class LinearLayer:
     def forward(
         self,
         input_host: np.ndarray,
-        block: tuple[int, int, int] = (16, 16, 1),
+        block: tuple[int, int, int] = (
+            Engine.VEC_TILE // Engine.VEC_WIDTH,
+            Engine.VEC_TILE // Engine.VBLOCK_ROWS,
+            1,
+        ),
         stream: Optional[cuda.Stream] = None,
     ) -> np.ndarray:
         input_host = np.ascontiguousarray(input_host, dtype=np.float32)

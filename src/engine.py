@@ -20,7 +20,9 @@ class Engine:
     VBLOCK_ROWS = 2
 
     def __init__(
-        self, kernel_dir: Optional[Path | str] = None, nvcc_options: Optional[list[str]] = None
+        self,
+        kernel_dir: Optional[Path | str] = None,
+        nvcc_options: Optional[list[str]] = None,
     ) -> None:
         self.kernel_dir = (
             Path(kernel_dir).resolve()
@@ -67,9 +69,7 @@ class Engine:
             del self._kernel_cache[key]
         return module
 
-    def get_kernel(
-        self, kernel_name: str, module_name: Optional[str | Path] = None
-    ) -> cuda.Function:
+    def get_kernel(self, kernel_name: str, module_name: Optional[str | Path] = None) -> cuda.Function:
         if module_name is not None:
             module_name = self._normalize_module_name(module_name)
             cache_key = (module_name, kernel_name)
@@ -128,13 +128,16 @@ class Engine:
         return device_allocation
 
     def download(
-        self, device_allocation: cuda.DeviceAllocation, shape: tuple[int, ...], dtype: np.dtype
+        self,
+        device_allocation: cuda.DeviceAllocation,
+        shape: tuple[int, ...],
+        dtype: np.dtype,
     ) -> np.ndarray:
         host_array = np.empty(shape, dtype=dtype)
         cuda.memcpy_dtoh(host_array, device_allocation)
         return host_array
 
-    def run_matmul(
+    def matmul(
         self,
         a_gpu: cuda.DeviceAllocation,
         b_gpu: cuda.DeviceAllocation,
@@ -142,38 +145,22 @@ class Engine:
         m: int,
         k: int,
         n: int,
-        kernel: str = "naive",
-        block: tuple[int, int, int] = (16, 16, 1),
+        block: Optional[tuple[int, int, int]] = None,
         stream: Optional[cuda.Stream] = None,
     ) -> None:
-        kernel_map = {
-            "naive": "matmul_naive",
-            "tiled": "matmul_tiled",
-            "vectorized": "matmul_vectorized",
-        }
-        if kernel not in kernel_map:
-            raise ValueError(f"Unsupported matmul kernel: {kernel}")
-
-        function = self.get_kernel(kernel_map[kernel], module_name="fp32/matmul.cu")
-        if kernel == "naive":
-            launch_block = block
-            grid = (_ceil_div(n, launch_block[0]), _ceil_div(m, launch_block[1]), 1)
-        elif kernel == "tiled":
-            launch_block = (self.TILED_TILE, self.TILED_TILE, 1)
-            grid = (_ceil_div(n, self.TILED_TILE), _ceil_div(m, self.TILED_TILE), 1)
-        else:
-            launch_block = (self.VEC_TILE // self.VEC_WIDTH, self.VEC_TILE // self.VBLOCK_ROWS, 1)
-            expected_block = (
-                self.VEC_TILE // self.VEC_WIDTH,
-                self.VEC_TILE // self.VBLOCK_ROWS,
-                1,
+        function = self.get_kernel("matmul", module_name="fp32/matmul.cu")
+        expected_block = (
+            self.VEC_TILE // self.VEC_WIDTH,
+            self.VEC_TILE // self.VBLOCK_ROWS,
+            1,
+        )
+        launch_block = expected_block if block is None else block
+        if launch_block != expected_block:
+            raise ValueError(
+                f"matmul currently expects block={expected_block}. "
+                "Update both kernels/fp32/matmul.cu::matmul and this launch config together."
             )
-            if block not in ((16, 16, 1), expected_block):
-                raise ValueError(
-                    f"Vectorized matmul uses fixed block={expected_block}. "
-                    "Use default block or explicitly pass the fixed value."
-                )
-            grid = (_ceil_div(n, self.VEC_TILE), _ceil_div(m, self.VEC_TILE), 1)
+        grid = (_ceil_div(n, self.VEC_TILE), _ceil_div(m, self.VEC_TILE), 1)
 
         function(
             a_gpu,
@@ -187,30 +174,30 @@ class Engine:
             stream=stream,
         )
 
-    def run_activation(
-        self,
-        activation: str,
-        x_gpu: cuda.DeviceAllocation,
-        y_gpu: cuda.DeviceAllocation,
-        numel: int,
-        block: tuple[int, int, int] = (256, 1, 1),
-        stream: Optional[cuda.Stream] = None,
-    ) -> None:
-        activation_map = {
-            "relu": "relu_forward",
-            "sigmoid": "sigmoid_forward",
-            "tanh": "tanh_forward",
-        }
-        if activation not in activation_map:
-            raise ValueError(f"Unsupported activation: {activation}")
+    def __matmul__(self, operands: tuple[object, ...]) -> cuda.DeviceAllocation:
+        if not isinstance(operands, tuple):
+            raise TypeError(
+                "Engine @ expects a tuple: "
+                "(a_gpu, b_gpu, c_gpu, m, k, n[, block[, stream]])"
+            )
+        if len(operands) < 6 or len(operands) > 8:
+            raise ValueError(
+                "Engine @ expects 6-8 tuple entries: "
+                "(a_gpu, b_gpu, c_gpu, m, k, n[, block[, stream]])"
+            )
 
-        function = self.get_kernel(activation_map[activation], module_name="fp32/activations.cu")
-        grid = (_ceil_div(numel, block[0]), 1, 1)
-        function(
-            x_gpu,
-            y_gpu,
-            np.int32(numel),
+        a_gpu, b_gpu, c_gpu, m, k, n, *optional = operands
+        block = optional[0] if len(optional) >= 1 else None
+        stream = optional[1] if len(optional) >= 2 else None
+
+        self.matmul(
+            a_gpu,
+            b_gpu,
+            c_gpu,
+            m=int(m),
+            k=int(k),
+            n=int(n),
             block=block,
-            grid=grid,
             stream=stream,
         )
+        return c_gpu
