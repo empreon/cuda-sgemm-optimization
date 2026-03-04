@@ -17,18 +17,7 @@
 #define MM_VBLOCK_ROWS 2
 #endif
 
-#if (MM_VEC_TILE % MM_VEC_WIDTH) != 0
-#error "MM_VEC_TILE must be divisible by MM_VEC_WIDTH."
-#endif
-
-#if (MM_VEC_TILE % MM_VBLOCK_ROWS) != 0
-#error "MM_VEC_TILE must be divisible by MM_VBLOCK_ROWS."
-#endif
-
-__device__ __forceinline__ float4 load_float4_with_bounds(
-    const float* row_ptr,
-    int col_start,
-    int row_width) {
+__device__ __forceinline__ float4 load_float4_with_bounds(const float* row_ptr, int col_start, int row_width) {
   float4 out = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
 
   if (col_start + 3 < row_width) {
@@ -50,12 +39,7 @@ __device__ __forceinline__ float4 load_float4_with_bounds(
   return out;
 }
 
-__device__ __forceinline__ void matmul_naive_impl(const float* A,
-                                                  const float* B,
-                                                  float* C,
-                                                  int M,
-                                                  int K,
-                                                  int N) {
+__device__ __forceinline__ void matmul_naive_impl(const float* A, const float* B, float* C, int M, int K, int N) {
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -69,12 +53,7 @@ __device__ __forceinline__ void matmul_naive_impl(const float* A,
   }
 }
 
-__device__ __forceinline__ void matmul_tiled_impl(const float* A,
-                                                  const float* B,
-                                                  float* C,
-                                                  int M,
-                                                  int K,
-                                                  int N) {
+__device__ __forceinline__ void matmul_tiled_impl(const float* A, const float* B, float* C, int M, int K, int N) {
   constexpr int kTileSize = MM_TILED_TILE;
   if (blockDim.x != kTileSize || blockDim.y != kTileSize) {
     return;
@@ -114,12 +93,7 @@ __device__ __forceinline__ void matmul_tiled_impl(const float* A,
   }
 }
 
-__device__ __forceinline__ void matmul_vectorized_impl(const float* __restrict__ A,
-                                                       const float* __restrict__ B,
-                                                       float* __restrict__ C,
-                                                       int M,
-                                                       int K,
-                                                       int N) {
+__device__ __forceinline__ void matmul_vectorized_impl(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N) {
   constexpr int kVecTileSize = MM_VEC_TILE;
   constexpr int kVecWidth = MM_VEC_WIDTH;
   constexpr int kVBlockRows = MM_VBLOCK_ROWS;
@@ -218,12 +192,7 @@ __device__ __forceinline__ void matmul_vectorized_impl(const float* __restrict__
   }
 }
 
-extern "C" __global__ void matmul(const float* __restrict__ A,
-                                  const float* __restrict__ B,
-                                  float* __restrict__ C,
-                                  int M,
-                                  int K,
-                                  int N) {
+extern "C" __global__ void matmul(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N) {
   // matmul_naive_impl(A, B, C, M, K, N);
   // matmul_tiled_impl(A, B, C, M, K, N);
   matmul_vectorized_impl(A, B, C, M, K, N);
