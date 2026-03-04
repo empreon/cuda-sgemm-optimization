@@ -14,15 +14,7 @@ from src.engine import Engine
 from src.utils import gemm_gflops, gpu_benchmark
 
 
-def _run_cublas_row_major(
-    handle: int,
-    a_gpu: cuda.DeviceAllocation,
-    b_gpu: cuda.DeviceAllocation,
-    c_gpu: cuda.DeviceAllocation,
-    m: int,
-    k: int,
-    n: int,
-) -> None:
+def _run_cublas_row_major(handle: int, a_gpu: cuda.DeviceAllocation, b_gpu: cuda.DeviceAllocation, c_gpu: cuda.DeviceAllocation, m: int, k: int, n: int) -> None:
     import skcuda.cublas as cublas
 
     alpha = np.float32(1.0)
@@ -31,28 +23,11 @@ def _run_cublas_row_major(
     # cublas assumes column-major matrices.
     # To emulate C_row_major = A_row_major @ B_row_major without extra transpose kernels:
     # C_col_major(NxM) = B_col_major(NxK) @ A_col_major(KxM)
-    cublas.cublasSgemm(
-        handle,
-        "n",
-        "n",
-        n,
-        m,
-        k,
-        alpha,
-        int(b_gpu),
-        n,
-        int(a_gpu),
-        k,
-        beta,
-        int(c_gpu),
-        n,
-    )
+    cublas.cublasSgemm(handle, "n", "n", n, m, k, alpha, int(b_gpu), n, int(a_gpu), k, beta, int(c_gpu), n)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Benchmark active PyCUDA matmul kernel against cuBLAS SGEMM."
-    )
+    parser = argparse.ArgumentParser(description="Benchmark active PyCUDA matmul kernel against cuBLAS SGEMM.")
     parser.add_argument("--m", type=int, default=1024)
     parser.add_argument("--k", type=int, default=512)
     parser.add_argument("--n", type=int, default=2048)
@@ -69,9 +44,7 @@ def main() -> None:
     try:
         import skcuda.cublas as cublas
     except ImportError as exc:
-        raise RuntimeError(
-            "scikit-cuda is required for cuBLAS comparison. Install with `pip install scikit-cuda`."
-        ) from exc
+        raise RuntimeError("scikit-cuda is required for cuBLAS comparison. Install with `pip install scikit-cuda`.") from exc
 
     np.random.seed(args.seed)
     m, k, n = args.m, args.k, args.n
@@ -90,16 +63,8 @@ def main() -> None:
 
     handle = cublas.cublasCreate()
     try:
-        custom_stats = gpu_benchmark(
-            lambda: engine.matmul(a_gpu, b_gpu, c_custom_gpu, m=m, k=k, n=n, block=block),
-            warmup=args.warmup,
-            repeat=args.repeat,
-        )
-        cublas_stats = gpu_benchmark(
-            lambda: _run_cublas_row_major(handle, a_gpu, b_gpu, c_cublas_gpu, m, k, n),
-            warmup=args.warmup,
-            repeat=args.repeat,
-        )
+        custom_stats = gpu_benchmark(lambda: engine.matmul(a_gpu, b_gpu, c_custom_gpu, m=m, k=k, n=n, block=block), warmup=args.warmup, repeat=args.repeat)
+        cublas_stats = gpu_benchmark(lambda: _run_cublas_row_major(handle, a_gpu, b_gpu, c_cublas_gpu, m, k, n), warmup=args.warmup, repeat=args.repeat)
     finally:
         cublas.cublasDestroy(handle)
 

@@ -1,45 +1,6 @@
 #include "common.cuh"
-#include <cstdint>
 
-#ifndef MM_TILED_TILE
-#define MM_TILED_TILE 16
-#endif
-
-#ifndef MM_VEC_TILE
-#define MM_VEC_TILE 32
-#endif
-
-#ifndef MM_VEC_WIDTH
-#define MM_VEC_WIDTH 4
-#endif
-
-#ifndef MM_VBLOCK_ROWS
-#define MM_VBLOCK_ROWS 2
-#endif
-
-__device__ __forceinline__ float4 load_float4_with_bounds(const float* row_ptr, int col_start, int row_width) {
-  float4 out = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
-
-  if (col_start + 3 < row_width) {
-    const float* ptr = row_ptr + col_start;
-    if ((reinterpret_cast<std::uintptr_t>(ptr) & 0xF) == 0) {
-      return *reinterpret_cast<const float4*>(ptr);
-    }
-    out.x = ptr[0];
-    out.y = ptr[1];
-    out.z = ptr[2];
-    out.w = ptr[3];
-    return out;
-  }
-
-  if (col_start < row_width) out.x = row_ptr[col_start];
-  if (col_start + 1 < row_width) out.y = row_ptr[col_start + 1];
-  if (col_start + 2 < row_width) out.z = row_ptr[col_start + 2];
-  if (col_start + 3 < row_width) out.w = row_ptr[col_start + 3];
-  return out;
-}
-
-__device__ __forceinline__ void matmul_naive_impl(const float* A, const float* B, float* C, int M, int K, int N) {
+__device__ __forceinline__ void matmul_naive(const float* A, const float* B, float* C, int M, int K, int N) {
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -53,7 +14,7 @@ __device__ __forceinline__ void matmul_naive_impl(const float* A, const float* B
   }
 }
 
-__device__ __forceinline__ void matmul_tiled_impl(const float* A, const float* B, float* C, int M, int K, int N) {
+__device__ __forceinline__ void matmul_tiled(const float* A, const float* B, float* C, int M, int K, int N) {
   constexpr int kTileSize = MM_TILED_TILE;
   if (blockDim.x != kTileSize || blockDim.y != kTileSize) {
     return;
@@ -93,7 +54,7 @@ __device__ __forceinline__ void matmul_tiled_impl(const float* A, const float* B
   }
 }
 
-__device__ __forceinline__ void matmul_vectorized_impl(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N) {
+__device__ __forceinline__ void matmul_vectorized(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N) {
   constexpr int kVecTileSize = MM_VEC_TILE;
   constexpr int kVecWidth = MM_VEC_WIDTH;
   constexpr int kVBlockRows = MM_VBLOCK_ROWS;
@@ -130,7 +91,7 @@ __device__ __forceinline__ void matmul_vectorized_impl(const float* __restrict__
       float4 a_vec = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
       if (row < M) {
         const float* a_row = A + ROW_MAJOR_INDEX(row, 0, K);
-        a_vec = load_float4_with_bounds(a_row, k_col_start, K);
+        a_vec = *reinterpret_cast<const float4*>(a_row + k_col_start);
       }
       tile_a[tile_row][local_col_vec * kVecWidth + 0] = a_vec.x;
       tile_a[tile_row][local_col_vec * kVecWidth + 1] = a_vec.y;
@@ -138,11 +99,8 @@ __device__ __forceinline__ void matmul_vectorized_impl(const float* __restrict__
       tile_a[tile_row][local_col_vec * kVecWidth + 3] = a_vec.w;
 
       const int k_b = tile_idx * kVecTileSize + tile_row;
-      float4 b_vec = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
-      if (k_b < K) {
-        const float* b_row = B + ROW_MAJOR_INDEX(k_b, 0, N);
-        b_vec = load_float4_with_bounds(b_row, col_base, N);
-      }
+      const float* b_row = B + ROW_MAJOR_INDEX(k_b, 0, N);
+      const float4 b_vec = *reinterpret_cast<const float4*>(b_row + col_base);
       tile_b[tile_row][local_col_vec * kVecWidth + 0] = b_vec.x;
       tile_b[tile_row][local_col_vec * kVecWidth + 1] = b_vec.y;
       tile_b[tile_row][local_col_vec * kVecWidth + 2] = b_vec.z;
@@ -193,7 +151,7 @@ __device__ __forceinline__ void matmul_vectorized_impl(const float* __restrict__
 }
 
 extern "C" __global__ void matmul(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N) {
-  // matmul_naive_impl(A, B, C, M, K, N);
-  // matmul_tiled_impl(A, B, C, M, K, N);
-  matmul_vectorized_impl(A, B, C, M, K, N);
+  // matmul_naive(A, B, C, M, K, N);
+  // matmul_tiled(A, B, C, M, K, N);
+  matmul_vectorized(A, B, C, M, K, N);
 }

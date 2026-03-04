@@ -103,13 +103,19 @@ class Engine:
         cuda.memcpy_dtoh(host_array, device_allocation)
         return host_array
 
-    def _validate_matmul_config(self, block: tuple[int, int, int]) -> tuple[int, int, int]:
+    def _validate_matmul_config(self, a_gpu: cuda.DeviceAllocation, b_gpu: cuda.DeviceAllocation, k: int, n: int, block: tuple[int, int, int]) -> tuple[int, int, int]:
         if self.VEC_TILE <= 0 or self.VEC_WIDTH <= 0 or self.VBLOCK_ROWS <= 0:
             raise ValueError("Invalid matmul config: VEC_TILE, VEC_WIDTH and VBLOCK_ROWS must be > 0.")
         if self.VEC_TILE % self.VEC_WIDTH != 0:
             raise ValueError(f"Invalid matmul config: VEC_TILE ({self.VEC_TILE}) must be divisible by VEC_WIDTH ({self.VEC_WIDTH}).")
         if self.VEC_TILE % self.VBLOCK_ROWS != 0:
             raise ValueError(f"Invalid matmul config: VEC_TILE ({self.VEC_TILE}) must be divisible by VBLOCK_ROWS ({self.VBLOCK_ROWS}).")
+        if k % self.VEC_TILE != 0:
+            raise ValueError(f"matmul currently expects K to be divisible by {self.VEC_TILE}, got K={k}.")
+        if n % self.VEC_TILE != 0:
+            raise ValueError(f"matmul currently expects N to be divisible by {self.VEC_TILE}, got N={n}.")
+        if int(a_gpu) % 16 != 0 or int(b_gpu) % 16 != 0:
+            raise ValueError("matmul currently expects A and B device pointers to be 16-byte aligned.")
         expected_block = (self.VEC_TILE // self.VEC_WIDTH, self.VEC_TILE // self.VBLOCK_ROWS, 1)
         if block != expected_block:
             raise ValueError(f"matmul currently expects block={expected_block}. Update kernels/fp32/matmul.cu::matmul and this launch config together.")
@@ -118,7 +124,7 @@ class Engine:
     def matmul(self, a_gpu: cuda.DeviceAllocation, b_gpu: cuda.DeviceAllocation, c_gpu: cuda.DeviceAllocation, m: int, k: int, n: int, block: Optional[tuple[int, int, int]] = None, stream: Optional[cuda.Stream] = None) -> None:
         default_block = (self.VEC_TILE // self.VEC_WIDTH, self.VEC_TILE // self.VBLOCK_ROWS, 1)
         launch_block = default_block if block is None else block
-        self._validate_matmul_config(launch_block)
+        self._validate_matmul_config(a_gpu, b_gpu, k, n, launch_block)
         function = self.get_kernel("matmul", module_name="fp32/matmul.cu")
         function(a_gpu, b_gpu, c_gpu, np.int32(m), np.int32(k), np.int32(n), block=launch_block, grid=(_ceil_div(n, self.VEC_TILE), _ceil_div(m, self.VEC_TILE), 1), stream=stream)
 
