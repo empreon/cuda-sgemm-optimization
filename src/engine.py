@@ -14,10 +14,10 @@ def _ceil_div(value: int, divisor: int) -> int:
 
 
 class Engine:
-    TILED_TILE = 32
-    VEC_TILE = 32
+    TILED_TILE = 64
+    VEC_TILE = 64
     VEC_WIDTH = 4
-    VBLOCK_ROWS = 2
+    VBLOCK_ROWS = 8
 
     def __init__(self, kernel_dir: Optional[Path | str] = None, nvcc_options: Optional[list[str]] = None) -> None:
         self.kernel_dir = Path(kernel_dir).resolve() if kernel_dir is not None else Path(__file__).resolve().parents[1] / "kernels"

@@ -150,24 +150,21 @@ __device__ __forceinline__ void matmul_vectorized(const float* __restrict__ A, c
   }
 }
 
-__device__ __forceinline__ void matmul_vectorized_opt(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N) {
+__device__ __forceinline__ void matmul_vectorized_2d_tiling(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ C, int M, int K, int N) {
   constexpr int kVecTileSize = MM_VEC_TILE;
   constexpr int kVecWidth = MM_VEC_WIDTH;
   constexpr int kVBlockRows = MM_VBLOCK_ROWS;
-  constexpr int kExpectedBlockX = kVecTileSize / kVecWidth;
-  constexpr int kExpectedBlockY = kVecTileSize / kVBlockRows;
 
-  if (blockDim.x != kExpectedBlockX || blockDim.y != kExpectedBlockY) {
-    return;
-  }
-
-  __shared__ float tile_a[kVecTileSize][kVecTileSize];
-  __shared__ float tile_b[kVecTileSize][kVecTileSize];
+  __shared__ float tile_a[kVecTileSize][kVecTileSize + 1];
+  __shared__ float tile_b[kVecTileSize][kVecTileSize + 1];
 
   const int local_row_block = threadIdx.y;
   const int local_col_vec = threadIdx.x;
   const int row_base = blockIdx.y * kVecTileSize + local_row_block * kVBlockRows;
   const int col_base = blockIdx.x * kVecTileSize + local_col_vec * kVecWidth;
+
+  const float* a_ptr = A + (row_base * K) + (local_col_vec * kVecWidth);
+  const float* b_ptr = B + (local_row_block * kVBlockRows * N) + col_base;
 
   float4 acc[kVBlockRows];
   #pragma unroll
@@ -178,13 +175,15 @@ __device__ __forceinline__ void matmul_vectorized_opt(const float* __restrict__ 
 
   for (int tile_idx = 0; tile_idx < tile_count; ++tile_idx) {
     const int k_col_start = tile_idx * kVecTileSize + local_col_vec * kVecWidth;
+    const float* current_a = a_ptr;
+    const float* current_b = b_ptr;
 
     #pragma unroll
     for (int row_offset = 0; row_offset < kVBlockRows; ++row_offset) {
       const int tile_row = local_row_block * kVBlockRows + row_offset;
 
-      float4 a_vec = *reinterpret_cast<const float4*>(A + ROW_MAJOR_INDEX(row_base + row_offset, k_col_start, K));
-      float4 b_vec = *reinterpret_cast<const float4*>(B + ROW_MAJOR_INDEX(tile_idx * kVecTileSize + tile_row, col_base, N));
+      float4 a_vec = *reinterpret_cast<const float4*>(current_a);
+      float4 b_vec = *reinterpret_cast<const float4*>(current_b);
 
       tile_a[tile_row][local_col_vec * kVecWidth + 0] = a_vec.x;
       tile_a[tile_row][local_col_vec * kVecWidth + 1] = a_vec.y;
@@ -195,6 +194,9 @@ __device__ __forceinline__ void matmul_vectorized_opt(const float* __restrict__ 
       tile_b[tile_row][local_col_vec * kVecWidth + 1] = b_vec.y;
       tile_b[tile_row][local_col_vec * kVecWidth + 2] = b_vec.z;
       tile_b[tile_row][local_col_vec * kVecWidth + 3] = b_vec.w;
+
+      current_a += K;
+      current_b += N;
     }
 
     __syncthreads();
@@ -218,6 +220,9 @@ __device__ __forceinline__ void matmul_vectorized_opt(const float* __restrict__ 
         acc[row_offset].w += a_scalar * b_values.w;
       }
     }
+
+    a_ptr += kVecTileSize;
+    b_ptr += kVecTileSize * N;
   }
 
   __syncthreads();
@@ -237,5 +242,5 @@ extern "C" __global__ void matmul(const float* __restrict__ A, const float* __re
   // matmul_naive(A, B, C, M, K, N);
   // matmul_tiled(A, B, C, M, K, N);
   //matmul_vectorized(A, B, C, M, K, N);
-  matmul_vectorized_opt(A, B, C, M, K, N);
+  matmul_vectorized_2d_tiling(A, B, C, M, K, N);
 }
