@@ -59,7 +59,7 @@ def main() -> None:
     c_custom_gpu = engine.alloc("C_custom", m * n * np.dtype(np.float32).itemsize, reuse=False)
     c_cublas_gpu = engine.alloc("C_cublas", m * n * np.dtype(np.float32).itemsize, reuse=False)
 
-    block = (Engine.VEC_TILE // Engine.VEC_WIDTH, Engine.VEC_TILE // Engine.VBLOCK_ROWS, 1)
+    block = (engine.VEC_TILE // engine.VEC_WIDTH, engine.VEC_TILE // engine.VBLOCK_ROWS, 1)
 
     handle = cublas.cublasCreate()
     try:
