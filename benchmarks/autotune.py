@@ -4,6 +4,7 @@ import json
 import itertools
 from pathlib import Path
 import sys
+import time
 
 import numpy as np
 import pycuda.driver as cuda
@@ -50,7 +51,7 @@ def benchmark_cublas(handle, m, k, n, a_gpu, b_gpu, c_gpu):
             int(b_gpu), n, int(a_gpu), k, beta, int(c_gpu), n
         )
         
-    res = gpu_benchmark(fn, warmup=2, repeat=5)
+    res = gpu_benchmark(fn, warmup=3, repeat=15)
     mean_ms = res["mean_ms"]
     gflops = gemm_gflops(m, k, n, mean_ms)
     return mean_ms, gflops
@@ -58,6 +59,9 @@ def benchmark_cublas(handle, m, k, n, a_gpu, b_gpu, c_gpu):
 def run_autotune():
     MAX_SHARED_MEM_BYTES = 99 * 1024 
     VEC_WIDTH = 4
+
+    device = cuda.Device(0)
+    HW_WARP_SIZE = device.get_attribute(cuda.device_attribute.WARP_SIZE)
     
     tile_sizes = [32, 64, 128]
     asym_m_opts = [64, 128]
@@ -78,6 +82,8 @@ def run_autotune():
     matrices = generate_test_matrices()
     engine = Engine()
     results = {}
+    
+    TEST_TAG = "results"
 
     try:
         import skcuda.cublas as cublas
@@ -100,6 +106,7 @@ def run_autotune():
                     mean_ms, gflops = benchmark_cublas(handle, m, k, n, a_gpu, b_gpu, c_gpu)
                     cublas_ms.append(mean_ms)
                     cublas_gflops.append(gflops)
+                    time.sleep(0.1) # GPU cooling delay between tests
                 except cuda.MemoryError:
                     print(f" [cuBLAS Skip] Insufficient GPU Memory - Matrix: {m}x{k}x{n}")
                     break
@@ -114,6 +121,10 @@ def run_autotune():
                 "avg_ms": avg_cublas_ms
             }
             print(f" -> cuBLAS Avg GFLOPS: {avg_cublas_gflops:.2f} | Avg Time: {avg_cublas_ms:.2f} ms")
+            
+            cublas_filename = f"fp32_cuBLAS_{TEST_TAG}.json"
+            with open(cublas_filename, "w") as f:
+                json.dump(results["cuBLAS_Baseline"], f, indent=4)
 
     for kernel_name in kernels:
         results[kernel_name] = []
@@ -177,6 +188,11 @@ def run_autotune():
 
                 from pycuda import driver as cuda_driver
                 func.set_attribute(cuda_driver.function_attribute.MAX_DYNAMIC_SHARED_SIZE_BYTES, MAX_SHARED_MEM_BYTES)
+                
+                regs_per_thread = func.num_regs
+                local_mem_spill = func.local_size_bytes
+                static_shared = func.shared_size_bytes
+                
             except Exception as e:
                 print(f"Compilation failed: {e}")
                 continue
@@ -199,11 +215,13 @@ def run_autotune():
                         if "naive" in kernel_name: func(a_gpu, b_gpu, c_gpu, np.int32(m), np.int32(k), np.int32(n), block=block_dim, grid=grid_dim)
                         else: func(a_gpu, b_gpu, c_gpu, np.int32(m), np.int32(k), np.int32(n), block=block_dim, grid=grid_dim, shared=int(estimated_shared_mem))
 
-                    bench_res = gpu_benchmark(benchmark_fn, warmup=2, repeat=5)
+                    bench_res = gpu_benchmark(benchmark_fn, warmup=3, repeat=15)
                     mean_ms = bench_res["mean_ms"]
                     gflops = gemm_gflops(m, k, n, mean_ms)
                     config_gflops.append(gflops)
                     config_ms.append(mean_ms)
+                    
+                    time.sleep(0.15) # GPU cooling delay between tests
 
                 except cuda.MemoryError:
                     print(f"    [ERROR] Insufficient GPU Memory (OOM) - Matrix: {m}x{k}x{n}. Skipping...")
@@ -218,6 +236,7 @@ def run_autotune():
             if config_gflops:
                 avg_gflops = sum(config_gflops) / len(config_gflops)
                 avg_ms = sum(config_ms) / len(config_ms)
+                
                 results[kernel_name].append({
                     "VEC_TILE_M": tile_m,
                     "VEC_TILE_N": tile_n,
@@ -225,14 +244,28 @@ def run_autotune():
                     "VBLOCK_ROWS": vblock_rows,
                     "block_dim": block_dim,
                     "avg_gflops": avg_gflops,
-                    "avg_ms": avg_ms
+                    "avg_ms": avg_ms,
+                    "academics": {
+                        "threads_per_block": num_threads,
+                        "warps_per_block": ceil_div(num_threads, HW_WARP_SIZE),
+                        "registers_per_thread": regs_per_thread,
+                        "local_mem_spill_bytes": local_mem_spill, # if >0 then there is register spill
+                        "static_shared_mem_bytes": static_shared,
+                        "dynamic_shared_mem_bytes": estimated_shared_mem,
+                        "total_shared_mem_bytes": static_shared + estimated_shared_mem
+                    }
                 })
-                print(f" -> Avg GFLOPS: {avg_gflops:.2f} | Avg Time: {avg_ms:.2f} ms")
+                print(f" -> Avg GFLOPS: {avg_gflops:.2f} | Regs: {regs_per_thread} | Spill: {local_mem_spill}B")
 
-    with open("autotune_results.json", "w") as f:
-        json.dump(results, f, indent=4)
-        
-    print("\nTuning completed. Results saved to autotune_results.json")
+        if results[kernel_name]:
+            results[kernel_name] = sorted(results[kernel_name], key=lambda x: x["avg_gflops"], reverse=True)
+            kernel_filename = f"fp32_{kernel_name}_{TEST_TAG}.json"
+            
+            with open(kernel_filename, "w") as f:
+                json.dump(results[kernel_name], f, indent=4)
+            print(f"[*] {kernel_name} tuning results saved to {kernel_filename}.\n")
+
+    print("\nTuning completed. All kernels saved to their respective .json files.")
 
 if __name__ == "__main__":
     run_autotune()
