@@ -35,17 +35,17 @@ The `matmul.cu` file contains the following kernel variants:
 
 Run the benchmark script to compare the active custom kernel against cuBLAS. You can specify the matrix dimensions via command-line arguments.
 
-bash
+```bash
 python bench_cublas.py --m 1024 --k 512 --n 2048
-
+```
 
 ### Autotuning
 
 Run the autotuner to find the best block configurations for all implemented kernels across various matrix sizes.
 
-bash
+```bash
 python autotune.py
-
+```
 
 The autotuner evaluates different configurations and safely skips those exceeding shared memory limits. It outputs JSON files containing the performance metrics (GFLOPS, latency, memory usage) for the tested configurations, sorted by performance.
 
